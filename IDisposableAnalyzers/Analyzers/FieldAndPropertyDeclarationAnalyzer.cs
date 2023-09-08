@@ -22,22 +22,26 @@ internal class FieldAndPropertyDeclarationAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(c => HandleField(c), SyntaxKind.FieldDeclaration);
-        context.RegisterSyntaxNodeAction(c => HandleProperty(c), SyntaxKind.PropertyDeclaration);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var ignoredSymbols = IgnoredSymbols.Read(compilationContext);
+            context.RegisterSyntaxNodeAction(c => HandleField(c, ignoredSymbols), SyntaxKind.FieldDeclaration);
+            context.RegisterSyntaxNodeAction(c => HandleProperty(c, ignoredSymbols), SyntaxKind.PropertyDeclaration);
+        });
     }
 
-    private static void HandleField(SyntaxNodeAnalysisContext context)
+    private static void HandleField(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.ContainingSymbol is IFieldSymbol { IsStatic: false, IsConst: false } field &&
             context.Node is FieldDeclarationSyntax declaration &&
             Disposable.IsPotentiallyAssignableFrom(field.Type, context.Compilation))
         {
-            HandleFieldOrProperty(context, new FieldOrPropertyAndDeclaration(field, declaration));
+            HandleFieldOrProperty(context, new FieldOrPropertyAndDeclaration(field, declaration), ignoredSymbols);
         }
     }
 
-    private static void HandleProperty(SyntaxNodeAnalysisContext context)
+    private static void HandleProperty(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.ContainingSymbol is IPropertySymbol { IsStatic: false, IsIndexer: false } property &&
@@ -45,15 +49,15 @@ internal class FieldAndPropertyDeclarationAnalyzer : DiagnosticAnalyzer
             accessors.FirstOrDefault() is { Body: null, ExpressionBody: null } &&
             Disposable.IsPotentiallyAssignableFrom(property.Type, context.Compilation))
         {
-            HandleFieldOrProperty(context, new FieldOrPropertyAndDeclaration(property, declaration));
+            HandleFieldOrProperty(context, new FieldOrPropertyAndDeclaration(property, declaration), ignoredSymbols);
         }
     }
 
-    private static void HandleFieldOrProperty(SyntaxNodeAnalysisContext context, FieldOrPropertyAndDeclaration member)
+    private static void HandleFieldOrProperty(SyntaxNodeAnalysisContext context, FieldOrPropertyAndDeclaration member, IgnoredSymbols ignoredSymbols)
     {
         using var walker = AssignedValueWalker.Borrow(member.FieldOrProperty.Symbol, context.SemanticModel, context.CancellationToken);
         using var recursive = RecursiveValues.Borrow(walker.Values, context.SemanticModel, context.CancellationToken);
-        if (Disposable.IsAnyCreation(recursive, context.SemanticModel, context.CancellationToken))
+        if (Disposable.IsAnyCreation(recursive, context.SemanticModel, ignoredSymbols, context.CancellationToken))
         {
             if (InitializeAndCleanup.IsAssignedInInitialize(member, context.SemanticModel, context.CancellationToken, out _, out var initialize))
             {

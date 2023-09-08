@@ -10,7 +10,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 internal static partial class Disposable
 {
-    internal static bool ShouldDispose(LocalOrParameter localOrParameter, SemanticModel semanticModel, CancellationToken cancellationToken)
+    internal static bool ShouldDispose(LocalOrParameter localOrParameter, SemanticModel semanticModel, IgnoredSymbols ignoredSymbols, CancellationToken cancellationToken)
     {
         if (localOrParameter.Symbol is IParameterSymbol { RefKind: not RefKind.None })
         {
@@ -18,6 +18,11 @@ internal static partial class Disposable
         }
 
         if (localOrParameter.Type.IsAssignableTo(KnownSymbols.Task, semanticModel.Compilation))
+        {
+            return false;
+        }
+
+        if (ignoredSymbols.Contains(localOrParameter.Type))
         {
             return false;
         }

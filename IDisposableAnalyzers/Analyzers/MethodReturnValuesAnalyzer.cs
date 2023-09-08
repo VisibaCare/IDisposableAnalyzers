@@ -17,10 +17,14 @@ internal class MethodReturnValuesAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(c => Handle(c), SyntaxKind.MethodDeclaration, SyntaxKind.GetAccessorDeclaration);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var ignoredSymbols = IgnoredSymbols.Read(compilationContext);
+            context.RegisterSyntaxNodeAction(c => Handle(c, ignoredSymbols), SyntaxKind.MethodDeclaration, SyntaxKind.GetAccessorDeclaration);
+        });
     }
 
-    private static void Handle(SyntaxNodeAnalysisContext context)
+    private static void Handle(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (context.ContainingSymbol is IMethodSymbol method &&
             context.Node is MethodDeclarationSyntax methodDeclaration &&
@@ -36,7 +40,7 @@ internal class MethodReturnValuesAnalyzer : DiagnosticAnalyzer
 
         bool IsCreated(ExpressionSyntax expression)
         {
-            return Disposable.IsCreation(expression, context.SemanticModel, context.CancellationToken);
+            return Disposable.IsCreation(expression, context.SemanticModel, ignoredSymbols, context.CancellationToken);
         }
 
         bool IsCachedOrInjected(ExpressionSyntax expression)

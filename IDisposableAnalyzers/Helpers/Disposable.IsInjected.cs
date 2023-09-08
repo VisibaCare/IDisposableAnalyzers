@@ -9,7 +9,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 internal static partial class Disposable
 {
-    internal static bool IsCachedOrInjectedOnly(ExpressionSyntax value, ExpressionSyntax location, SemanticModel semanticModel, CancellationToken cancellationToken)
+    internal static bool IsCachedOrInjectedOnly(ExpressionSyntax value, ExpressionSyntax location, SemanticModel semanticModel, IgnoredSymbols ignoredSymbols, CancellationToken cancellationToken)
     {
         if (semanticModel.TryGetSymbol(value, cancellationToken, out var symbol))
         {
@@ -28,18 +28,18 @@ internal static partial class Disposable
                     IdentifierNameSyntax { Parent: MemberAccessExpressionSyntax { Expression: { } parent, Name: { } name } }
                         when value == name &&
                              parent is not InstanceExpressionSyntax
-                        => IsCachedOrInjectedOnly(parent, location, semanticModel, cancellationToken),
+                        => IsCachedOrInjectedOnly(parent, location, semanticModel, ignoredSymbols, cancellationToken),
                     IdentifierNameSyntax { Parent: MemberBindingExpressionSyntax { Parent: MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax { Parent: ConditionalAccessExpressionSyntax { Expression: { } parent, Parent: ExpressionStatementSyntax _ } } } } }
-                        => IsCachedOrInjectedOnly(parent, location, semanticModel, cancellationToken),
+                        => IsCachedOrInjectedOnly(parent, location, semanticModel, ignoredSymbols, cancellationToken),
                     IdentifierNameSyntax { Parent: MemberBindingExpressionSyntax { Parent: ConditionalAccessExpressionSyntax { Parent: ConditionalAccessExpressionSyntax { Expression: { } parent, Parent: ExpressionStatementSyntax _ } } } }
-                        => IsCachedOrInjectedOnly(parent, location, semanticModel, cancellationToken),
+                        => IsCachedOrInjectedOnly(parent, location, semanticModel, ignoredSymbols, cancellationToken),
                     _ => IsInjectedCore(symbol),
                 };
             }
 
             using var recursive = RecursiveValues.Borrow(walker.Values, semanticModel, cancellationToken);
             return IsAnyCachedOrInjected(recursive, semanticModel, cancellationToken) &&
-                   !IsAnyCreation(recursive, semanticModel, cancellationToken);
+                   !IsAnyCreation(recursive, semanticModel, ignoredSymbols, cancellationToken);
         }
 
         return false;

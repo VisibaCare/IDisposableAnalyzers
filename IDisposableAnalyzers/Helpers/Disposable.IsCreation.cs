@@ -13,7 +13,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 internal static partial class Disposable
 {
-    internal static bool IsAlreadyAssignedWithCreated(ExpressionSyntax disposable, SemanticModel semanticModel, CancellationToken cancellationToken, [NotNullWhen(true)] out ISymbol? assignedSymbol)
+    internal static bool IsAlreadyAssignedWithCreated(ExpressionSyntax disposable, SemanticModel semanticModel, IgnoredSymbols ignoredSymbols, CancellationToken cancellationToken, [NotNullWhen(true)] out ISymbol? assignedSymbol)
     {
         if (!IsPotentiallyAssignableFrom(disposable, semanticModel, cancellationToken))
         {
@@ -56,7 +56,7 @@ internal static partial class Disposable
 
             foreach (var candidate in assignedSymbols)
             {
-                if (IsAssignedWithCreated(candidate, disposable, semanticModel, cancellationToken))
+                if (IsAssignedWithCreated(candidate, disposable, semanticModel, ignoredSymbols, cancellationToken))
                 {
                     assignedSymbol = candidate;
                     return true;
@@ -90,7 +90,7 @@ internal static partial class Disposable
         }
 
         using var recursive = RecursiveValues.Borrow(assignedValues.Values, semanticModel, cancellationToken);
-        return IsAnyCreation(recursive, semanticModel, cancellationToken);
+        return IsAnyCreation(recursive, semanticModel, ignoredSymbols, cancellationToken);
 
         bool IsReturnedBefore(ExpressionSyntax expression)
         {
@@ -112,7 +112,7 @@ internal static partial class Disposable
         }
     }
 
-    internal static bool IsAssignedWithCreated(ISymbol symbol, ExpressionSyntax location, SemanticModel semanticModel, CancellationToken cancellationToken)
+    internal static bool IsAssignedWithCreated(ISymbol symbol, ExpressionSyntax location, SemanticModel semanticModel, IgnoredSymbols ignoredSymbols, CancellationToken cancellationToken)
     {
         if (symbol.Kind == SymbolKind.Discard)
         {
@@ -121,13 +121,13 @@ internal static partial class Disposable
 
         using var walker = AssignedValueWalker.Borrow(symbol, location, semanticModel, cancellationToken);
         using var recursive = RecursiveValues.Borrow(walker.Values, semanticModel, cancellationToken);
-        return IsAnyCreation(recursive, semanticModel, cancellationToken);
+        return IsAnyCreation(recursive, semanticModel, ignoredSymbols, cancellationToken);
     }
 
     /// <summary>
     /// Check if any path returns a created IDisposable.
     /// </summary>
-    internal static bool IsCreation(ExpressionSyntax candidate, SemanticModel semanticModel, CancellationToken cancellationToken)
+    internal static bool IsCreation(ExpressionSyntax candidate, SemanticModel semanticModel, IgnoredSymbols ignoredSymbols, CancellationToken cancellationToken)
     {
         switch (candidate.Kind())
         {
@@ -155,6 +155,11 @@ internal static partial class Disposable
 
         if (candidate is BaseObjectCreationExpressionSyntax)
         {
+            if (semanticModel.TryGetSymbol(candidate, cancellationToken, out var ctor) && ignoredSymbols.Contains(ctor))
+            {
+                return false;
+            }
+
             return true;
         }
 
@@ -164,10 +169,10 @@ internal static partial class Disposable
         }
 
         using var recursive = RecursiveValues.Borrow(new[] { candidate }, semanticModel, cancellationToken);
-        return IsAnyCreation(recursive, semanticModel, cancellationToken);
+        return IsAnyCreation(recursive, semanticModel, ignoredSymbols, cancellationToken);
     }
 
-    internal static bool IsAnyCreation(RecursiveValues values, SemanticModel semanticModel, CancellationToken cancellationToken)
+    internal static bool IsAnyCreation(RecursiveValues values, SemanticModel semanticModel, IgnoredSymbols ignoredSymbols, CancellationToken cancellationToken)
     {
         if (values.IsEmpty)
         {
@@ -177,7 +182,7 @@ internal static partial class Disposable
         values.Reset();
         while (values.MoveNext())
         {
-            if (IsCreationCore(values.Current, semanticModel, cancellationToken))
+            if (IsCreationCore(values.Current, semanticModel, ignoredSymbols, cancellationToken))
             {
                 return true;
             }
@@ -189,7 +194,7 @@ internal static partial class Disposable
     /// <summary>
     /// Check if any path returns a created IDisposable.
     /// </summary>
-    private static bool IsCreationCore(ExpressionSyntax candidate, SemanticModel semanticModel, CancellationToken cancellationToken)
+    private static bool IsCreationCore(ExpressionSyntax candidate, SemanticModel semanticModel, IgnoredSymbols ignoredSymbols, CancellationToken cancellationToken)
     {
         if (candidate.IsMissing)
         {
@@ -214,6 +219,11 @@ internal static partial class Disposable
 
         if (semanticModel.TryGetSymbol(candidate, cancellationToken, out var symbol))
         {
+            if (ignoredSymbols.Contains(symbol))
+            {
+                return false;
+            }
+
             return symbol switch
             {
                 IParameterSymbol _ => false,

@@ -26,10 +26,14 @@ internal class DisposeCallAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(c => Handle(c), SyntaxKind.InvocationExpression);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var ignoredSymbols = IgnoredSymbols.Read(compilationContext);
+            context.RegisterSyntaxNodeAction(c => Handle(c, ignoredSymbols), SyntaxKind.InvocationExpression);
+        });
     }
 
-    private static void Handle(SyntaxNodeAnalysisContext context)
+    private static void Handle(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.Node is InvocationExpressionSyntax invocation &&
@@ -37,7 +41,7 @@ internal class DisposeCallAnalyzer : DiagnosticAnalyzer
             !invocation.TryFirstAncestorOrSelf<AnonymousFunctionExpressionSyntax>(out _) &&
             call.FindDisposed(context.SemanticModel, context.CancellationToken) is { } disposed)
         {
-            if (Disposable.IsCachedOrInjectedOnly(disposed, invocation, context.SemanticModel, context.CancellationToken) &&
+            if (Disposable.IsCachedOrInjectedOnly(disposed, invocation, context.SemanticModel, ignoredSymbols, context.CancellationToken) &&
                 !StaticMemberInStaticContext(disposed, context) &&
                 NotLeaveOpen())
             {
@@ -52,7 +56,7 @@ internal class DisposeCallAnalyzer : DiagnosticAnalyzer
                     context.ReportDiagnostic(Diagnostic.Create(Descriptors.IDISP016DoNotUseDisposedInstance, invocation.FirstAncestorOrSelf<StatementSyntax>()?.GetLocation() ?? invocation.GetLocation(), additionalLocations: locations));
                 }
 
-                if (IsPreferUsing(local, invocation, context))
+                if (IsPreferUsing(local, invocation, context, ignoredSymbols))
                 {
                     context.ReportDiagnostic(Diagnostic.Create(Descriptors.IDISP017PreferUsing, invocation.GetLocation()));
                 }
@@ -163,7 +167,7 @@ internal class DisposeCallAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static bool IsPreferUsing(ILocalSymbol local, InvocationExpressionSyntax invocation, SyntaxNodeAnalysisContext context)
+    private static bool IsPreferUsing(ILocalSymbol local, InvocationExpressionSyntax invocation, SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         return invocation.IsSymbol(KnownSymbols.IDisposable.Dispose, context.SemanticModel, context.CancellationToken) &&
                local.TrySingleDeclaration(context.CancellationToken, out var declaration) &&
@@ -177,7 +181,7 @@ internal class DisposeCallAnalyzer : DiagnosticAnalyzer
         {
             return localDeclarationStatement!.Parent == expressionStatement!.Parent &&
                    declarator is { Initializer.Value: { } value } &&
-                   Disposable.IsCreation(value, context.SemanticModel, context.CancellationToken);
+                   Disposable.IsCreation(value, context.SemanticModel, ignoredSymbols, context.CancellationToken);
         }
 
         bool IsTrivialTryFinally()

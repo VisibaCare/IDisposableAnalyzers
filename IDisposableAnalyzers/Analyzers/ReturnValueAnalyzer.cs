@@ -23,35 +23,39 @@ internal class ReturnValueAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(c => HandleReturnValue(c), SyntaxKind.ReturnStatement);
-        context.RegisterSyntaxNodeAction(c => HandleArrow(c), SyntaxKind.ArrowExpressionClause);
-        context.RegisterSyntaxNodeAction(c => HandleLambda(c), SyntaxKind.ParenthesizedLambdaExpression);
-        context.RegisterSyntaxNodeAction(c => HandleLambda(c), SyntaxKind.SimpleLambdaExpression);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var ignoredSymbols = IgnoredSymbols.Read(compilationContext);
+            context.RegisterSyntaxNodeAction(c => HandleReturnValue(c, ignoredSymbols), SyntaxKind.ReturnStatement);
+            context.RegisterSyntaxNodeAction(c => HandleArrow(c, ignoredSymbols), SyntaxKind.ArrowExpressionClause);
+            context.RegisterSyntaxNodeAction(c => HandleLambda(c, ignoredSymbols), SyntaxKind.ParenthesizedLambdaExpression);
+            context.RegisterSyntaxNodeAction(c => HandleLambda(c, ignoredSymbols), SyntaxKind.SimpleLambdaExpression);
+        });
     }
 
-    private static void HandleReturnValue(SyntaxNodeAnalysisContext context)
+    private static void HandleReturnValue(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.ContainingSymbol is { } &&
             !IsIgnored(context.ContainingSymbol) &&
             context.Node is ReturnStatementSyntax { Expression: { } expression })
         {
-            HandleReturnValue(context, expression);
+            HandleReturnValue(context, expression, ignoredSymbols);
         }
     }
 
-    private static void HandleArrow(SyntaxNodeAnalysisContext context)
+    private static void HandleArrow(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.ContainingSymbol is { } &&
             !IsIgnored(context.ContainingSymbol) &&
             context.Node is ArrowExpressionClauseSyntax { Expression: { } expression })
         {
-            HandleReturnValue(context, expression);
+            HandleReturnValue(context, expression, ignoredSymbols);
         }
     }
 
-    private static void HandleLambda(SyntaxNodeAnalysisContext context)
+    private static void HandleLambda(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.ContainingSymbol is { } &&
@@ -59,7 +63,7 @@ internal class ReturnValueAnalyzer : DiagnosticAnalyzer
             context.Node is LambdaExpressionSyntax { Body: ExpressionSyntax expression } lambda &&
             ShouldHandle())
         {
-            HandleReturnValue(context, expression);
+            HandleReturnValue(context, expression, ignoredSymbols);
         }
 
         bool ShouldHandle()
@@ -72,13 +76,13 @@ internal class ReturnValueAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static void HandleReturnValue(SyntaxNodeAnalysisContext context, ExpressionSyntax returnValue)
+    private static void HandleReturnValue(SyntaxNodeAnalysisContext context, ExpressionSyntax returnValue, IgnoredSymbols ignoredSymbols)
     {
-        if (Disposable.IsCreation(returnValue, context.SemanticModel, context.CancellationToken) &&
+        if (Disposable.IsCreation(returnValue, context.SemanticModel, ignoredSymbols, context.CancellationToken) &&
             context.SemanticModel.TryGetSymbol(returnValue, context.CancellationToken, out var returnedSymbol))
         {
             if (IsUsing(returnedSymbol, context.CancellationToken) ||
-                Disposable.IsDisposedBefore(returnedSymbol, returnValue, context.SemanticModel, context.CancellationToken))
+                Disposable.IsDisposedBefore(returnedSymbol, returnValue, context.SemanticModel, ignoredSymbols, context.CancellationToken))
             {
                 context.ReportDiagnostic(Diagnostic.Create(Descriptors.IDISP011DontReturnDisposed, returnValue.GetLocation()));
             }
@@ -107,11 +111,11 @@ internal class ReturnValueAnalyzer : DiagnosticAnalyzer
             foreach (var argument in arguments)
             {
                 if (argument is { Expression: { } expression } &&
-                    Disposable.IsCreation(expression, context.SemanticModel, context.CancellationToken) &&
+                    Disposable.IsCreation(expression, context.SemanticModel, ignoredSymbols, context.CancellationToken) &&
                     context.SemanticModel.TryGetSymbol(expression, context.CancellationToken, out var argumentSymbol))
                 {
                     if (IsUsing(argumentSymbol, context.CancellationToken) ||
-                        Disposable.IsDisposedBefore(argumentSymbol, expression, context.SemanticModel, context.CancellationToken))
+                        Disposable.IsDisposedBefore(argumentSymbol, expression, context.SemanticModel, ignoredSymbols, context.CancellationToken))
                     {
                         if (IsLazyEnumerable(invocation, containingType, context.SemanticModel, context.CancellationToken))
                         {
@@ -144,10 +148,10 @@ internal class ReturnValueAnalyzer : DiagnosticAnalyzer
                 return returnValue switch
                 {
                     InvocationExpressionSyntax invocation
-                        => !(invocation.IsSymbol(KnownSymbols.Task.FromResult,         context.SemanticModel, context.CancellationToken)
+                        => !(invocation.IsSymbol(KnownSymbols.Task.FromResult, context.SemanticModel, context.CancellationToken)
                              || invocation.IsSymbol(KnownSymbols.ValueTask.FromResult, context.SemanticModel, context.CancellationToken)),
                     MemberAccessExpressionSyntax { Name.Identifier.ValueText: "CompletedTask" } memberAccess
-                        => !(memberAccess.IsSymbol(KnownSymbols.Task.CompletedTask,         context.SemanticModel, context.CancellationToken)
+                        => !(memberAccess.IsSymbol(KnownSymbols.Task.CompletedTask, context.SemanticModel, context.CancellationToken)
                              || memberAccess.IsSymbol(KnownSymbols.ValueTask.CompletedTask, context.SemanticModel, context.CancellationToken)),
                     DefaultExpressionSyntax => false,
                     LiteralExpressionSyntax => false,

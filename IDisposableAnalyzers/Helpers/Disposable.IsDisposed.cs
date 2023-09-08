@@ -9,7 +9,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 internal static partial class Disposable
 {
-    internal static bool IsDisposedBefore(ISymbol symbol, ExpressionSyntax expression, SemanticModel semanticModel, CancellationToken cancellationToken)
+    internal static bool IsDisposedBefore(ISymbol symbol, ExpressionSyntax expression, SemanticModel semanticModel, IgnoredSymbols ignoredSymbols, CancellationToken cancellationToken)
     {
         if (Scope(expression) is { } block)
         {
@@ -79,7 +79,7 @@ internal static partial class Disposable
                     IsExecutedBefore(statement) &&
                     semanticModel.TryGetSymbol(assignment.Left, cancellationToken, out var assigned) &&
                     SymbolComparer.Equal(assigned, symbol) &&
-                    IsCreation(assignment.Right, semanticModel, cancellationToken))
+                    IsCreation(assignment.Right, semanticModel, ignoredSymbols, cancellationToken))
                 {
                     return true;
                 }

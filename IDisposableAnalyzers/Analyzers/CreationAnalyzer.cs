@@ -20,16 +20,20 @@ internal class CreationAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(c => Handle(c), SyntaxKind.ObjectCreationExpression, SyntaxKind.InvocationExpression, SyntaxKind.SimpleMemberAccessExpression, SyntaxKind.ConditionalAccessExpression);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var ignoredSymbols = IgnoredSymbols.Read(compilationContext);
+            context.RegisterSyntaxNodeAction(c => Handle(c, ignoredSymbols), SyntaxKind.ObjectCreationExpression, SyntaxKind.InvocationExpression, SyntaxKind.SimpleMemberAccessExpression, SyntaxKind.ConditionalAccessExpression);
+        });
     }
 
-    private static void Handle(SyntaxNodeAnalysisContext context)
+    private static void Handle(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.ContainingSymbol is { } &&
             ShouldCheck(context) is { } expression)
         {
-            if (Disposable.IsCreation(expression, context.SemanticModel, context.CancellationToken) &&
+            if (Disposable.IsCreation(expression, context.SemanticModel, ignoredSymbols, context.CancellationToken) &&
                 Disposable.Ignores(expression, context.SemanticModel, context.CancellationToken))
             {
                 context.ReportDiagnostic(Diagnostic.Create(Descriptors.IDISP004DoNotIgnoreCreated, context.Node.GetLocation()));

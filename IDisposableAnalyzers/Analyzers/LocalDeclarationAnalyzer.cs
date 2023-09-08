@@ -20,10 +20,14 @@ internal class LocalDeclarationAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(c => Handle(c), SyntaxKind.LocalDeclarationStatement);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var ignoredSymbols = IgnoredSymbols.Read(compilationContext);
+            compilationContext.RegisterSyntaxNodeAction(c => Handle(c, ignoredSymbols), SyntaxKind.LocalDeclarationStatement);
+        });
     }
 
-    private static void Handle(SyntaxNodeAnalysisContext context)
+    private static void Handle(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.Node is LocalDeclarationStatementSyntax { Declaration: { Variables: { } variables } localDeclaration } statement)
@@ -33,9 +37,9 @@ internal class LocalDeclarationAnalyzer : DiagnosticAnalyzer
                 foreach (var declarator in variables)
                 {
                     if (declarator.Initializer is { Value: { } value } &&
-                        Disposable.IsCreation(value, context.SemanticModel, context.CancellationToken) &&
+                        Disposable.IsCreation(value, context.SemanticModel, ignoredSymbols, context.CancellationToken) &&
                         context.SemanticModel.TryGetSymbol(declarator, context.CancellationToken, out ILocalSymbol? local) &&
-                        Disposable.ShouldDispose(new LocalOrParameter(local), context.SemanticModel, context.CancellationToken))
+                        Disposable.ShouldDispose(new LocalOrParameter(local), context.SemanticModel, ignoredSymbols, context.CancellationToken))
                     {
                         context.ReportDiagnostic(Diagnostic.Create(Descriptors.IDISP001DisposeCreated, localDeclaration.GetLocation()));
                     }
@@ -46,7 +50,7 @@ internal class LocalDeclarationAnalyzer : DiagnosticAnalyzer
                 foreach (var declarator in variables)
                 {
                     if (declarator is { Initializer.Value: { } value } &&
-                        Disposable.IsCachedOrInjectedOnly(value, value, context.SemanticModel, context.CancellationToken))
+                        Disposable.IsCachedOrInjectedOnly(value, value, context.SemanticModel, ignoredSymbols, context.CancellationToken))
                     {
                         context.ReportDiagnostic(Diagnostic.Create(Descriptors.IDISP007DoNotDisposeInjected, value.GetLocation()));
                     }

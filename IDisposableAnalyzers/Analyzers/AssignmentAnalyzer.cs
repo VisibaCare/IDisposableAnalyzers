@@ -22,10 +22,14 @@ internal class AssignmentAnalyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(c => Handle(c), SyntaxKind.SimpleAssignmentExpression);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var ignoredSymbols = IgnoredSymbols.Read(compilationContext);
+            context.RegisterSyntaxNodeAction(c => Handle(c, ignoredSymbols), SyntaxKind.SimpleAssignmentExpression);
+        });
     }
 
-    private static void Handle(SyntaxNodeAnalysisContext context)
+    private static void Handle(SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (!context.IsExcludedFromAnalysis() &&
             context.Node is AssignmentExpressionSyntax { Left: { } left, Right: { } right } assignment &&
@@ -33,13 +37,13 @@ internal class AssignmentAnalyzer : DiagnosticAnalyzer
             context.SemanticModel.TryGetSymbol(left, context.CancellationToken, out var assignedSymbol))
         {
             if (LocalOrParameter.TryCreate(assignedSymbol, out var localOrParameter) &&
-                Disposable.IsCreation(right, context.SemanticModel, context.CancellationToken) &&
-                Disposable.ShouldDispose(localOrParameter, context.SemanticModel, context.CancellationToken))
+                Disposable.IsCreation(right, context.SemanticModel, ignoredSymbols, context.CancellationToken) &&
+                Disposable.ShouldDispose(localOrParameter, context.SemanticModel, ignoredSymbols, context.CancellationToken))
             {
                 context.ReportDiagnostic(Diagnostic.Create(Descriptors.IDISP001DisposeCreated, assignment.GetLocation()));
             }
 
-            if (IsReassignedWithCreated(assignment, context))
+            if (IsReassignedWithCreated(assignment, context, ignoredSymbols))
             {
                 context.ReportDiagnostic(Diagnostic.Create(Descriptors.IDISP003DisposeBeforeReassigning, assignment.GetLocation()));
             }
@@ -54,7 +58,7 @@ internal class AssignmentAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static bool IsReassignedWithCreated(AssignmentExpressionSyntax assignment, SyntaxNodeAnalysisContext context)
+    private static bool IsReassignedWithCreated(AssignmentExpressionSyntax assignment, SyntaxNodeAnalysisContext context, IgnoredSymbols ignoredSymbols)
     {
         if (assignment.Right is IdentifierNameSyntax { Identifier.ValueText: "value" } &&
             assignment.FirstAncestor<AccessorDeclarationSyntax>() is { } accessor &&
@@ -68,7 +72,7 @@ internal class AssignmentAnalyzer : DiagnosticAnalyzer
             return false;
         }
 
-        if (Disposable.IsAlreadyAssignedWithCreated(assignment.Left, context.SemanticModel, context.CancellationToken, out var assignedSymbol))
+        if (Disposable.IsAlreadyAssignedWithCreated(assignment.Left, context.SemanticModel, ignoredSymbols, context.CancellationToken, out var assignedSymbol))
         {
             switch (assignedSymbol)
             {
@@ -79,7 +83,7 @@ internal class AssignmentAnalyzer : DiagnosticAnalyzer
                     return false;
             }
 
-            if (Disposable.IsDisposedBefore(assignedSymbol, assignment, context.SemanticModel, context.CancellationToken))
+            if (Disposable.IsDisposedBefore(assignedSymbol, assignment, context.SemanticModel, ignoredSymbols, context.CancellationToken))
             {
                 return false;
             }
